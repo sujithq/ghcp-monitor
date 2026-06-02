@@ -1,0 +1,28 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  azuremonitor:
+    connection_string: "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  # debug:
+  #   verbosity: detailed
+
+service:
+  # telemetry:
+  #   logs:
+  #     level: debug
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [azuremonitor] # , debug]
+    metrics:
+      receivers: [otlp]
+      exporters: [azuremonitor] # , debug]
+    logs:
+      receivers: [otlp]
+      exporters: [azuremonitor] # , debug]

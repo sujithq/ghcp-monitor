@@ -1,0 +1,19 @@
+# Secrets / local env
+.env
+*.env
+*.local
+local.settings.json
+
+# Connection strings / credentials accidentally dumped
+*connection*string*.txt
+appinsights*.txt
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+*.log
