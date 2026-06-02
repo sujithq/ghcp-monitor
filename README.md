@@ -62,10 +62,10 @@ Read-Host -Prompt "Application Insights connection string" | ForEach-Object { $e
 
 ## 4) Run collector as a local background service
 
-The collector runs as a detached Docker container managed by `startService.ps1`.
-It uses the **contrib** image (contains `azuremonitor` exporter) and starts with
-`--restart unless-stopped`, so it keeps running after the terminal closes and
-auto-starts when Docker/Windows boots.
+The collector runs as a detached Docker container defined in `docker-compose.yml`
+and managed by `startService.ps1`. It uses the **contrib** image (contains the
+`azuremonitor` exporter) and sets `restart: unless-stopped`, so it keeps running
+after the terminal closes and auto-starts when Docker/Windows boots.
 
 Start it in the background:
 
@@ -86,10 +86,13 @@ Lifecycle commands:
 The script:
 
 - Auto-retrieves the App Insights connection string via `az cli` (or reuses
-  `APPLICATIONINSIGHTS_CONNECTION_STRING` if already set), so the secret is not
-  typed on the command line or stored in PowerShell history.
-- Is idempotent: re-running `start` will not double-launch; it cleans up any
-  stale container named `ai-monitor-otelcol` first.
+  `APPLICATIONINSIGHTS_CONNECTION_STRING` if already set), then passes it to
+  Compose as an environment variable — the secret is never written to disk.
+- Wraps `docker compose up -d` / `down`, so the container definition lives in
+  version control and the image tag is updatable by Dependabot.
+
+The collector image tag is pinned in `docker-compose.yml`. Dependabot opens
+weekly pull requests to bump it (see `.github/dependabot.yml`).
 
 Important:
 

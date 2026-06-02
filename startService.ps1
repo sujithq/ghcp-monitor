@@ -7,17 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $ContainerName = 'ai-monitor-otelcol'
-$Image = 'ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.153.0'
-$ConfigPath = Join-Path $PSScriptRoot 'otel-collector-config.yaml'
+$ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $AppInsightsName = 'ai-monitor'
 $AppInsightsResourceGroup = 'rg-monitor-ai'
 
-function Test-Container {
-    param([switch]$Running)
-    $dockerArgs = @('ps', '-a', '--filter', "name=^/$ContainerName$", '--format', '{{.Names}}')
-    if ($Running) { $dockerArgs += @('--filter', 'status=running') }
-    $found = & docker @dockerArgs 2>$null
-    return [bool]($found -eq $ContainerName)
+function Invoke-Compose {
+    param([Parameter(Mandatory)][string[]]$ComposeArgs)
+    & docker compose -f $ComposeFile @ComposeArgs
+    if ($LASTEXITCODE -ne 0) { throw "docker compose $($ComposeArgs -join ' ') failed (exit $LASTEXITCODE)." }
 }
 
 function Get-ConnectionString {
@@ -37,47 +34,34 @@ function Get-ConnectionString {
 }
 
 function Start-CollectorService {
-    if (Test-Container -Running) {
-        Write-Host "Already running: '$ContainerName'."
-        return
+    if (-not (Test-Path $ComposeFile)) {
+        throw "Compose file not found: $ComposeFile"
     }
-    if (Test-Container) {
-        Write-Host "Removing stale container '$ContainerName'..."
-        docker rm -f $ContainerName | Out-Null
-    }
-    if (-not (Test-Path $ConfigPath)) {
-        throw "Config not found: $ConfigPath"
-    }
-
-    $cs = Get-ConnectionString
+    $env:APPLICATIONINSIGHTS_CONNECTION_STRING = Get-ConnectionString
 
     Write-Host "Starting background collector '$ContainerName' (auto-restart enabled)..."
-    docker run -d `
-        --name $ContainerName `
-        --restart unless-stopped `
-        -p 4317:4317 -p 4318:4318 `
-        -e APPLICATIONINSIGHTS_CONNECTION_STRING="$cs" `
-        --mount "type=bind,source=$ConfigPath,target=/etc/otelcol-contrib/config.yaml" `
-        $Image | Out-Null
-
-    if ($LASTEXITCODE -ne 0) { throw "Failed to start container '$ContainerName'." }
+    try {
+        Invoke-Compose @('up', '-d')
+    }
+    catch {
+        # A container with this name may exist from a previous non-Compose run.
+        # Remove it and retry once so Compose can manage it.
+        Write-Host "Compose up failed; removing any conflicting container '$ContainerName' and retrying..."
+        & docker rm -f $ContainerName 2>$null | Out-Null
+        Invoke-Compose @('up', '-d')
+    }
     Write-Host "Started. Listening on OTLP gRPC :4317 and HTTP :4318."
     Write-Host "It will auto-start with Docker on boot. Stop with: .\startService.ps1 stop"
 }
 
 function Stop-CollectorService {
-    if (-not (Test-Container)) {
-        Write-Host "Not present: '$ContainerName'."
-        return
-    }
     Write-Host "Stopping and removing '$ContainerName'..."
-    docker rm -f $ContainerName | Out-Null
+    Invoke-Compose @('down')
     Write-Host "Stopped."
 }
 
 function Show-Status {
-    docker ps -a --filter "name=^/$ContainerName$" `
-        --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    Invoke-Compose @('ps')
 }
 
 switch ($Action) {
@@ -85,5 +69,5 @@ switch ($Action) {
     'stop' { Stop-CollectorService }
     'restart' { Stop-CollectorService; Start-CollectorService }
     'status' { Show-Status }
-    'logs' { docker logs -f $ContainerName }
+    'logs' { Invoke-Compose @('logs', '-f') }
 }

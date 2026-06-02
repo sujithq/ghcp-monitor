@@ -11,7 +11,8 @@ Copilot Chat / gh copilot ──OTLP──▶ otelcol-contrib (Docker, :4317 gRP
                                         └── azuremonitor exporter ──▶ App Insights
 ```
 
-- `startService.ps1` — lifecycle manager for the collector container (start/stop/restart/status/logs).
+- `startService.ps1` — lifecycle manager wrapping `docker compose` (start/stop/restart/status/logs).
+- `docker-compose.yml` — the collector service definition (image tag, ports, mount, restart policy).
 - `otel-collector-config.yaml` — collector pipeline (otlp receiver → azuremonitor exporter).
 - `README.md` — the human runbook; keep it in sync with any behavior change.
 
@@ -25,6 +26,8 @@ Copilot Chat / gh copilot ──OTLP──▶ otelcol-contrib (Docker, :4317 gRP
   `<placeholders>` in docs. This repo is public.
 - Use the **contrib** collector image only (`opentelemetry-collector-contrib`);
   the core image lacks the `azuremonitor` exporter.
+- The image tag is pinned in `docker-compose.yml` and updated via Dependabot
+  (`docker-compose` ecosystem). Do not hardcode image tags elsewhere.
 - Keep ports `4317` (gRPC) and `4318` (HTTP) — Copilot clients target these on
   `localhost`.
 
