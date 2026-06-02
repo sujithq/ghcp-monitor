@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a problem with the collector or scripts
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste real connection strings, subscription IDs, or App Insights
+        identifiers.** Redact them before submitting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `./startService.ps1`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version, PowerShell version, collector image tag.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (redacted)
+      description: Output of `./startService.ps1 logs`, with secrets removed.
+      render: shell
