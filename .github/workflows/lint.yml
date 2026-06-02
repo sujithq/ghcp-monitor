@@ -42,9 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Run gitleaks (full tree scan)
+        uses: docker://ghcr.io/gitleaks/gitleaks:v8.24.3
         with:
-          fetch-depth: 0
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          args: dir --no-banner --redact --verbose --exit-code 1 /github/workspace

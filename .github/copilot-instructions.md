@@ -6,7 +6,7 @@ telemetry from GitHub Copilot (VS Code Chat + `gh copilot` CLI) and exports it t
 
 ## Architecture (the whole system)
 
-```
+```text
 Copilot Chat / gh copilot ──OTLP──▶ otelcol-contrib (Docker, :4317 gRPC / :4318 HTTP)
                                         └── azuremonitor exporter ──▶ App Insights
 ```
