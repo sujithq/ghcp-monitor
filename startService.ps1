@@ -13,6 +13,13 @@ $AppInsightsResourceGroup = 'rg-monitor-ai'
 
 function Invoke-Compose {
     param([Parameter(Mandatory)][string[]]$ComposeArgs)
+    # Compose interpolates APPLICATIONINSIGHTS_CONNECTION_STRING for every command
+    # (ps/down/logs included). Only container creation (up) needs the real value,
+    # which Start-CollectorService sets. Provide a placeholder otherwise so
+    # read-only and teardown commands don't require an az lookup or sign-in.
+    if (-not $env:APPLICATIONINSIGHTS_CONNECTION_STRING) {
+        $env:APPLICATIONINSIGHTS_CONNECTION_STRING = 'unset'
+    }
     & docker compose -f $ComposeFile @ComposeArgs
     if ($LASTEXITCODE -ne 0) { throw "docker compose $($ComposeArgs -join ' ') failed (exit $LASTEXITCODE)." }
 }
