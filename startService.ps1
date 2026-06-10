@@ -10,22 +10,41 @@ $ContainerName = 'ai-monitor-otelcol'
 $ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $AppInsightsName = 'ai-monitor'
 $AppInsightsResourceGroup = 'rg-monitor-ai'
+$PlaceholderConnectionString = 'unset'
 
 function Invoke-Compose {
     param([Parameter(Mandatory)][string[]]$ComposeArgs)
     # Compose interpolates APPLICATIONINSIGHTS_CONNECTION_STRING for every command
-    # (ps/down/logs included). Only container creation (up) needs the real value,
-    # which Start-CollectorService sets. Provide a placeholder otherwise so
-    # read-only and teardown commands don't require an az lookup or sign-in.
-    if (-not $env:APPLICATIONINSIGHTS_CONNECTION_STRING) {
-        $env:APPLICATIONINSIGHTS_CONNECTION_STRING = 'unset'
+    # (ps/down/logs included). Only container creation (up/create) needs a real
+    # value. For other commands, provide a temporary placeholder and remove it
+    # after the command so it never pollutes future start operations.
+    $composeCommand = if ($ComposeArgs.Count -gt 0) { $ComposeArgs[0].ToLowerInvariant() } else { '' }
+    $requiresRealConnectionString = @('up', 'create') -contains $composeCommand
+    $usingTemporaryPlaceholder = $false
+
+    if ($requiresRealConnectionString) {
+        if (-not $env:APPLICATIONINSIGHTS_CONNECTION_STRING -or $env:APPLICATIONINSIGHTS_CONNECTION_STRING -eq $PlaceholderConnectionString) {
+            throw 'APPLICATIONINSIGHTS_CONNECTION_STRING is missing or placeholder. Run start so the script can retrieve a real value via az cli.'
+        }
     }
-    & docker compose -f $ComposeFile @ComposeArgs
-    if ($LASTEXITCODE -ne 0) { throw "docker compose $($ComposeArgs -join ' ') failed (exit $LASTEXITCODE)." }
+    elseif (-not $env:APPLICATIONINSIGHTS_CONNECTION_STRING) {
+        $env:APPLICATIONINSIGHTS_CONNECTION_STRING = $PlaceholderConnectionString
+        $usingTemporaryPlaceholder = $true
+    }
+
+    try {
+        & docker compose -f $ComposeFile @ComposeArgs
+        if ($LASTEXITCODE -ne 0) { throw "docker compose $($ComposeArgs -join ' ') failed (exit $LASTEXITCODE)." }
+    }
+    finally {
+        if ($usingTemporaryPlaceholder) {
+            Remove-Item Env:APPLICATIONINSIGHTS_CONNECTION_STRING -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Get-ConnectionString {
-    if ($env:APPLICATIONINSIGHTS_CONNECTION_STRING) {
+    if ($env:APPLICATIONINSIGHTS_CONNECTION_STRING -and $env:APPLICATIONINSIGHTS_CONNECTION_STRING -ne $PlaceholderConnectionString) {
         return $env:APPLICATIONINSIGHTS_CONNECTION_STRING
     }
     Write-Host "Retrieving Application Insights connection string for '$AppInsightsName' in '$AppInsightsResourceGroup' via az cli..."
