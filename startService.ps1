@@ -76,7 +76,7 @@ function Start-CollectorService {
         & docker rm -f $ContainerName 2>$null | Out-Null
         Invoke-Compose @('up', '-d')
     }
-    Write-Host "Started. Listening on OTLP gRPC :4317 and HTTP :4318."
+    Write-Host "Started. Listening on OTLP HTTP :4318."
     Write-Host "It will auto-start with Docker on boot. Stop with: .\startService.ps1 stop"
 }
 

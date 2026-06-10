@@ -46,7 +46,7 @@ Current config uses:
 
 - `otlp` receiver on:
   - HTTP `0.0.0.0:4318`
-  - gRPC `0.0.0.0:4317`
+  - gRPC `0.0.0.0:4317` (commented out, optional)
 - `azuremonitor` exporter reading connection string from env var:
   - `APPLICATIONINSIGHTS_CONNECTION_STRING`
 - Debug exporter/logging currently commented out
@@ -172,6 +172,6 @@ Check status at any time:
 - End-to-end latency can be a few minutes.
 - If no data appears, verify:
   - collector is running
-  - ports 4317/4318 are published
+  - port 4318 is published
   - endpoint is `http://localhost:4318`
   - connection string matches the target App Insights resource

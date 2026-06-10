@@ -4,7 +4,7 @@ services:
     container_name: ai-monitor-otelcol
     restart: unless-stopped
     ports:
-      - "4317:4317" # OTLP gRPC
+      # - "4317:4317" # OTLP gRPC (optional)
       - "4318:4318" # OTLP HTTP
     environment:
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:?set APPLICATIONINSIGHTS_CONNECTION_STRING}
