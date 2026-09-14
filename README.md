@@ -264,8 +264,10 @@ never recreated or updated.
 
 The IP allowlist accepts canonical IPv4 CIDRs with prefixes `1-32`; a single
 address normally uses `/32`. It rejects missing/empty lists, malformed values,
+
 IPv6, `0.0.0.0/0`, and networks starting at the unspecified address `0.0.0.0`.
 All rules are `Allow`, so other source IPs are denied.
+
 Use the actual public egress IP, including any corporate proxy or VPN, not
 your machine's private address. IP restrictions are network access control,
 not per-user authentication: other clients sharing an allowed egress can send
