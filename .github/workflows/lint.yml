@@ -66,6 +66,12 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Compose configuration validation failed.' }
               $compose = $composeJson | ConvertFrom-Json -ErrorAction Stop
               $template = Get-Content $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+              foreach ($resourceType in @('Microsoft.App/managedEnvironments', 'Microsoft.OperationalInsights/workspaces')) {
+                  $declarations = @($template.resources.Values | Where-Object { $_.type -eq $resourceType })
+                  if ($declarations.Count -ne 1 -or $declarations[0].existing -eq $true) {
+                      throw "Expected one conditional creation declaration for $resourceType. Resolve reused resources by ID to avoid duplicate ARM resource definitions."
+                  }
+              }
               if ($template.variables.collectorConfig -cne $env:OTELCOL_CONFIG -or $template.variables['$fxv#0'].services.otelcol.image -cne $compose.services.otelcol.image) {
                   throw 'The compiled template must use the existing image pin and collector configuration.'
               }

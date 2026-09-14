@@ -32,14 +32,10 @@ param repository string
 
 var collectorImage = loadYamlContent('../docker-compose.yml').services.otelcol.image
 var collectorConfig = loadTextContent('../otel-collector-config.yaml')
+var existingWorkspaceId = resourceId(logAnalyticsResourceGroup, 'Microsoft.OperationalInsights/workspaces', logAnalyticsWorkspaceName)
 var tags = {
 	'managed-by': 'github-actions'
 	repository: repository
-}
-
-resource existingWorkspace 'Microsoft.OperationalInsights/workspaces@2025-02-01' existing = {
-	scope: resourceGroup(logAnalyticsResourceGroup)
-	name: logAnalyticsWorkspaceName
 }
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2025-02-01' = if (!reuseContainerAppEnvironment && !reuseLogAnalyticsWorkspace) {
@@ -57,10 +53,6 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2025-02-01' = if (!
 	}
 }
 
-resource existingEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' existing = {
-	name: containerAppEnvironmentName
-}
-
 resource environment 'Microsoft.App/managedEnvironments@2025-01-01' = if (!reuseContainerAppEnvironment) {
 	name: containerAppEnvironmentName
 	location: location
@@ -69,8 +61,8 @@ resource environment 'Microsoft.App/managedEnvironments@2025-01-01' = if (!reuse
 		appLogsConfiguration: {
 			destination: 'log-analytics'
 			logAnalyticsConfiguration: {
-				customerId: reuseLogAnalyticsWorkspace ? existingWorkspace.properties.customerId : workspace!.properties.customerId
-				sharedKey: reuseLogAnalyticsWorkspace ? existingWorkspace.listKeys().primarySharedKey : workspace!.listKeys().primarySharedKey
+				customerId: reuseLogAnalyticsWorkspace ? reference(existingWorkspaceId, '2025-02-01').customerId : workspace!.properties.customerId
+				sharedKey: reuseLogAnalyticsWorkspace ? listKeys(existingWorkspaceId, '2025-02-01').primarySharedKey : workspace!.listKeys().primarySharedKey
 			}
 		}
 		workloadProfiles: [
@@ -87,7 +79,7 @@ resource collector 'Microsoft.App/containerApps@2025-01-01' = {
 	location: location
 	tags: tags
 	properties: {
-		environmentId: reuseContainerAppEnvironment ? existingEnvironment.id : environment!.id
+		environmentId: reuseContainerAppEnvironment ? resourceId('Microsoft.App/managedEnvironments', containerAppEnvironmentName) : environment!.id
 		workloadProfileName: 'Consumption'
 		configuration: {
 			activeRevisionsMode: 'Single'

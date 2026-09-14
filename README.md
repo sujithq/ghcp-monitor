@@ -328,6 +328,14 @@ history entry exists. Use an authorized Azure session to inspect further
 details. For a reused workspace in another resource group, verify the
 deployment identity's workspace-read and shared-key-read permissions there.
 
+An `InvalidTemplate` error saying a resource is "defined multiple times in a
+template" means the template declares it twice, not that it already exists in
+Azure. The template resolves reused environments and workspaces by resource
+ID, without a second declaration alongside conditional creation. CI checks
+the compiled declarations for this regression. After a template fix reaches
+`main`, start a new **plan** run; rerunning an old job uses its original
+commit. Do not delete existing Azure resources to work around this error.
+
 ### Verify and switch clients
 
 Keep the local endpoint until cloud ingestion is verified. From an allowlisted
