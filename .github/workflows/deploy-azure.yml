@@ -1,0 +1,91 @@
+name: Deploy collector to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Preview changes or deploy the reviewed main commit
+        type: choice
+        options:
+          - plan
+          - deploy
+        default: plan
+        required: true
+      reviewed_sha:
+        description: Full commit SHA from a successful plan (required for deploy)
+        type: string
+        default: ''
+      prerequisites_confirmed:
+        description: Regional capacity, policy, permissions, and estimated cost reviewed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-collector
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/lint.yml
+
+  azure:
+    needs: checks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      AZURE_CORE_OUTPUT: none
+      AZURE_CORE_COLLECT_TELEMETRY: 'false'
+      AZURE_BICEP_CHECK_VERSION: 'false'
+      AZURE_EXTENSION_USE_DYNAMIC_INSTALL: 'no'
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      APPINSIGHTS_NAME: ${{ vars.APPINSIGHTS_NAME }}
+      CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      CONTAINER_APP_ENVIRONMENT_NAME: ${{ vars.CONTAINER_APP_ENVIRONMENT_NAME }}
+      REUSE_CONTAINER_APP_ENVIRONMENT: ${{ vars.REUSE_CONTAINER_APP_ENVIRONMENT }}
+      LOG_ANALYTICS_WORKSPACE_NAME: ${{ vars.LOG_ANALYTICS_WORKSPACE_NAME }}
+      LOG_ANALYTICS_RESOURCE_GROUP: ${{ vars.LOG_ANALYTICS_RESOURCE_GROUP }}
+      REUSE_LOG_ANALYTICS_WORKSPACE: ${{ vars.REUSE_LOG_ANALYTICS_WORKSPACE }}
+      ALLOWED_IP_CIDRS: ${{ vars.ALLOWED_IP_CIDRS }}
+      OPERATION: ${{ inputs.operation }}
+      REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+      PREREQUISITES_CONFIRMED: ${{ inputs.prerequisites_confirmed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate workflow configuration
+        run: |
+          Import-Module ./.github/scripts/AzureDeployment.psm1 -Force -ErrorAction Stop
+          $null = Get-CollectorDeploymentSetting -Operation $env:OPERATION -ReviewedSha $env:REVIEWED_SHA -PrerequisitesConfirmed ($env:PREREQUISITES_CONFIRMED -eq 'true')
+
+      - name: Install the validated Bicep compiler
+        run: |
+          az bicep install --version v0.45.6 --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw 'Bicep installation failed.' }
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Preview or deploy the collector
+        run: |
+          Import-Module ./.github/scripts/AzureDeployment.psm1 -Force -ErrorAction Stop
+          Invoke-CollectorDeployment -Operation $env:OPERATION -ReviewedSha $env:REVIEWED_SHA -PrerequisitesConfirmed ($env:PREREQUISITES_CONFIRMED -eq 'true')

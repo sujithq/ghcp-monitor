@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
@@ -13,6 +14,7 @@ jobs:
   powershell:
     name: PSScriptAnalyzer
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -23,9 +25,67 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          $results = @(
+              Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+              Invoke-ScriptAnalyzer -Path ./.github/scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+              Invoke-ScriptAnalyzer -Path ./.github/tests -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -ErrorAction Stop
+          )
           $results | Format-Table -AutoSize
           if ($results.Severity -contains 'Error') { exit 1 }
+
+      - name: Test deployment guards and orchestration
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -Repository PSGallery -ErrorAction Stop
+          Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop
+          $result = Invoke-Pester -Path ./.github/tests -Output Normal -PassThru
+          if ($result.FailedCount -gt 0 -or $result.PassedCount -eq 0) { exit 1 }
+
+  infrastructure:
+    name: Bicep and collector configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AZURE_BICEP_CHECK_VERSION: 'false'
+      AZURE_CORE_COLLECT_TELEMETRY: 'false'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compile infrastructure and validate the pinned collector
+        shell: pwsh
+        run: |
+          az bicep install --version v0.45.6 --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw 'Bicep installation failed.' }
+          $templatePath = Join-Path $env:RUNNER_TEMP 'collector-template.json'
+          az bicep build --file ./infra/main.bicep --outfile $templatePath --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
+          try {
+              $env:APPLICATIONINSIGHTS_CONNECTION_STRING = "InstrumentationKey=$([guid]::Empty);IngestionEndpoint=http://127.0.0.1:9/"
+              $env:OTELCOL_CONFIG = Get-Content ./otel-collector-config.yaml -Raw -ErrorAction Stop
+              $composeJson = docker compose -f ./docker-compose.yml config --format json
+              if ($LASTEXITCODE -ne 0) { throw 'Compose configuration validation failed.' }
+              $compose = $composeJson | ConvertFrom-Json -ErrorAction Stop
+              $template = Get-Content $templatePath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+              if ($template.variables.collectorConfig -cne $env:OTELCOL_CONFIG -or $template.variables['$fxv#0'].services.otelcol.image -cne $compose.services.otelcol.image) {
+                  throw 'The compiled template must use the existing image pin and collector configuration.'
+              }
+              docker run --rm --network none --env APPLICATIONINSIGHTS_CONNECTION_STRING --env OTELCOL_CONFIG $compose.services.otelcol.image validate --config=env:OTELCOL_CONFIG
+              if ($LASTEXITCODE -ne 0) { throw 'Collector env-provider validation failed.' }
+          }
+          finally {
+              Remove-Item Env:APPLICATIONINSIGHTS_CONNECTION_STRING, Env:OTELCOL_CONFIG -ErrorAction SilentlyContinue
+              Remove-Item $templatePath -ErrorAction SilentlyContinue
+          }
+
+  workflows:
+    name: Deployment workflow syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color .github/workflows/deploy-azure.yml .github/workflows/lint.yml
 
   markdown:
     name: markdownlint
