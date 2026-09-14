@@ -320,8 +320,13 @@ defaults for editor use. The workflow validates real Environment values
 before login and supplies the runtime parameters in one process. Do not
 compile or upload resolved parameter files containing live credentials, enable
 debug tracing, or dump raw Azure resource/what-if payloads to public logs.
-CLI failures intentionally withhold raw output; inspect the deployment or
-activity log in the Azure portal using your authorized account.
+CLI failures identify the failing subcommand and include sanitized error codes
+and messages for recognized Azure errors. Credentials and identifiers are
+redacted; unrelated or unrecognized raw output remains withheld. Retain the
+workflow error when `plan` fails: validation can fail before any deployment
+history entry exists. Use an authorized Azure session to inspect further
+details. For a reused workspace in another resource group, verify the
+deployment identity's workspace-read and shared-key-read permissions there.
 
 ### Verify and switch clients
 

@@ -115,6 +115,49 @@ function Get-CollectorDeploymentSetting {
     return $settings
 }
 
+function Get-AzureFailureDetail {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    $candidate = $Text.Trim() -replace '^ERROR:\s*', ''
+    $details = [System.Collections.Generic.List[string]]::new()
+    try {
+        $response = ConvertFrom-Json -InputObject $candidate -AsHashtable -ErrorAction Stop
+        if ($response -is [System.Collections.IDictionary]) {
+            $pending = [System.Collections.Generic.Queue[object]]::new()
+            $pending.Enqueue($(if ($response.Contains('error')) { $response['error'] } else { $response }))
+            while ($pending.Count -gt 0 -and $details.Count -lt 5) {
+                $errorDetail = $pending.Dequeue()
+                if ($errorDetail -isnot [System.Collections.IDictionary]) { continue }
+                if ([string]$errorDetail['code'] -cmatch '^[A-Za-z][A-Za-z0-9_.-]{0,79}$') {
+                    $details.Add("$($errorDetail['code']): $($errorDetail['message'])")
+                }
+                foreach ($child in $errorDetail['details']) { $pending.Enqueue($child) }
+            }
+        }
+    }
+    catch {
+        $standardError = [regex]::Match($candidate, '^\((?<code>[A-Za-z][A-Za-z0-9_.-]{0,79})\)\s*(?<message>[^\r\n]*)')
+        if ($standardError.Success) {
+            $details.Add("$($standardError.Groups['code'].Value): $($standardError.Groups['message'].Value)")
+        }
+    }
+
+    $safeDetail = $details -join ' | '
+    foreach ($name in @(
+            'APPLICATIONINSIGHTS_CONNECTION_STRING', 'AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID'
+        )) {
+        $value = [System.Environment]::GetEnvironmentVariable($name, 'Process')
+        if (-not [string]::IsNullOrEmpty($value)) { $safeDetail = $safeDetail.Replace($value, '<redacted>') }
+    }
+    $safeDetail = $safeDetail -replace '(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<redacted-id>'
+    $safeDetail = $safeDetail -replace '(?i)(\b[\w-]*(?:connectionstring|instrumentationkey|sharedkey|accesskey|accountkey|password|secret|token|sig)\b["'']?\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|[^\s;,]+)', '$1<redacted>'
+    $safeDetail = $safeDetail -replace '(?i)\bBearer\s+\S+', 'Bearer <redacted>'
+    $safeDetail = $safeDetail -replace '[\r\n]+', ' '
+    if ($safeDetail.Length -gt 1500) { $safeDetail = $safeDetail.Substring(0, 1500) + '...' }
+    return $safeDetail
+}
+
 function Invoke-AzureJson {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Arguments)
@@ -122,7 +165,11 @@ function Invoke-AzureJson {
     $PSNativeCommandUseErrorActionPreference = $false
     $commandOutput = @(& az @Arguments --only-show-errors --output json 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI $($Arguments[0]) $($Arguments[1]) failed (exit $LASTEXITCODE). Raw output is withheld to protect credentials; inspect Azure deployment or activity logs."
+        $exitCode = $LASTEXITCODE
+        $commandLength = if ($Arguments[0] -eq 'deployment') { 3 } else { 2 }
+        $commandName = ($Arguments | Select-Object -First $commandLength) -join ' '
+        $detail = Get-AzureFailureDetail -Text ($commandOutput -join "`n")
+        throw "Azure CLI $commandName failed (exit $exitCode). $detail Raw output is withheld to protect credentials; inspect Azure deployment or activity logs."
     }
     if ($commandOutput.Count -eq 0) { return $null }
     try {

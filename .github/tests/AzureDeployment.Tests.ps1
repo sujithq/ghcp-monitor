@@ -343,6 +343,57 @@ Describe 'Secret-safe Azure CLI output handling' {
             $failure.Exception.Message | Should -Not -BeLike '*synthetic-sensitive-error*'
         }
 
+        It 'reports the command and exit code even when Azure CLI produces no output' {
+            Mock az { $global:LASTEXITCODE = 1 }
+            { Invoke-AzureJson -Arguments @('deployment', 'group', 'validate') } |
+                Should -Throw '*deployment group validate failed (exit 1)*'
+        }
+
+        It 'identifies the failed deployment subcommand and nested Azure errors' {
+            Mock az {
+                $global:LASTEXITCODE = 1
+                'ERROR: {"error":{"code":"InvalidTemplateDeployment","message":"Validation failed.","details":[{"code":"LinkedAuthorizationFailed","message":"Missing permission to read workspace shared keys."}]}}'
+            }
+            $failure = { Invoke-AzureJson -Arguments @('deployment', 'group', 'validate') } | Should -Throw '*deployment group validate failed*' -PassThru
+            $failure.Exception.Message | Should -BeLike '*InvalidTemplateDeployment*LinkedAuthorizationFailed*Missing permission*'
+        }
+
+        It 'recognizes standard Azure CLI error formatting' {
+            Mock az {
+                $global:LASTEXITCODE = 1
+                'ERROR: (InvalidTemplate) The template contains an invalid resource reference.'
+            }
+            { Invoke-AzureJson -Arguments @('deployment', 'group', 'what-if') } |
+                Should -Throw '*deployment group what-if failed*InvalidTemplate*invalid resource reference*'
+        }
+
+        It 'redacts the runtime connection string from recognized diagnostics' {
+            $previousValue = $env:APPLICATIONINSIGHTS_CONNECTION_STRING
+            try {
+                $env:APPLICATIONINSIGHTS_CONNECTION_STRING = 'synthetic-private-runtime-value'
+                Mock az {
+                    $global:LASTEXITCODE = 1
+                    'ERROR: (InvalidTemplate) Unexpected value synthetic-private-runtime-value in the template.'
+                }
+                $failure = { Invoke-AzureJson -Arguments @('deployment', 'group', 'validate') } | Should -Throw '*InvalidTemplate*' -PassThru
+                $failure.Exception.Message | Should -Not -BeLike '*synthetic-private-runtime-value*'
+                $failure.Exception.Message | Should -BeLike '*<redacted>*'
+            }
+            finally {
+                if ($null -eq $previousValue) { Remove-Item Env:APPLICATIONINSIGHTS_CONNECTION_STRING -ErrorAction SilentlyContinue }
+                else { $env:APPLICATIONINSIGHTS_CONNECTION_STRING = $previousValue }
+            }
+        }
+
+        It 'redacts credential fields and ignores unrelated JSON response fields' {
+            Mock az {
+                $global:LASTEXITCODE = 1
+                'ERROR: {"code":"InvalidTemplate","message":"Bad sharedKey=synthetic-key; password=synthetic-password; Bearer synthetic-token","request":{"value":"synthetic-request-secret"}}'
+            }
+            $failure = { Invoke-AzureJson -Arguments @('deployment', 'group', 'validate') } | Should -Throw '*InvalidTemplate*' -PassThru
+            $failure.Exception.Message | Should -Not -Match 'synthetic-(key|password|token|request-secret)'
+        }
+
         It 'never includes malformed JSON output in an exception' {
             Mock az { $global:LASTEXITCODE = 0; 'synthetic-sensitive-output' }
             $failure = { Invoke-AzureJson -Arguments @('resource', 'show') } | Should -Throw '*unexpected output*' -PassThru
