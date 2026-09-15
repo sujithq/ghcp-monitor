@@ -316,6 +316,68 @@ Describe 'Azure deployment orchestration' {
             { Invoke-CollectorDeployment } | Should -Throw '*selected environment must be public*'
         }
 
+        It 'checks reused workspace read and listKeys access in <Operation> for <WorkspaceGroup>' -ForEach @(
+            @{ Operation = 'plan'; WorkspaceGroup = 'test-resource-group' }
+            @{ Operation = 'deploy'; WorkspaceGroup = 'test-resource-group' }
+            @{ Operation = 'plan'; WorkspaceGroup = 'other-test-group' }
+            @{ Operation = 'deploy'; WorkspaceGroup = 'other-test-group' }
+        ) {
+            $script:settings.REUSE_LOG_ANALYTICS_WORKSPACE = 'true'
+            $script:settings.LOG_ANALYTICS_RESOURCE_GROUP = $WorkspaceGroup
+            $workspaceUrl = "/subscriptions/$($script:settings.AZURE_SUBSCRIPTION_ID)/resourceGroups/$WorkspaceGroup/providers/Microsoft.OperationalInsights/workspaces/test-logs"
+            Mock Invoke-AzureJson { return $true } -ParameterFilter { $Arguments[0] -eq 'rest' }
+
+            $result = Invoke-CollectorDeployment -Operation $Operation
+            $result | Should -BeNullOrEmpty
+
+            Should -Invoke Invoke-AzureJson -Times 1 -Exactly -ParameterFilter {
+                $Arguments[0] -eq 'rest' -and $Arguments -contains 'get' -and
+                $Arguments -contains "${workspaceUrl}?api-version=2025-02-01" -and
+                $Arguments -contains '--query' -and $Arguments -contains 'properties.customerId != `null`'
+            }
+            Should -Invoke Invoke-AzureJson -Times 1 -Exactly -ParameterFilter {
+                $Arguments[0] -eq 'rest' -and $Arguments -contains 'post' -and
+                $Arguments -contains "$workspaceUrl/listKeys?api-version=2025-02-01" -and
+                $Arguments -contains '--query' -and $Arguments -contains 'primarySharedKey != `null`'
+            }
+            Should -Invoke Invoke-AzureJson -Times 1 -Exactly -ParameterFilter { $Arguments[0..2] -join ' ' -eq 'deployment group validate' }
+        }
+
+        It 'stops <Operation> before validation when reused workspace <Method> access fails' -ForEach @(
+            @{ Operation = 'plan'; Method = 'get' }
+            @{ Operation = 'plan'; Method = 'post' }
+            @{ Operation = 'deploy'; Method = 'get' }
+            @{ Operation = 'deploy'; Method = 'post' }
+        ) {
+            $script:settings.REUSE_LOG_ANALYTICS_WORKSPACE = 'true'
+            $script:settings.LOG_ANALYTICS_RESOURCE_GROUP = 'other-test-group'
+            Mock Invoke-AzureJson { return $true } -ParameterFilter { $Arguments[0] -eq 'rest' }
+            Mock Invoke-AzureJson { throw 'AuthorizationFailed: synthetic-sensitive-workspace-detail' } -ParameterFilter {
+                $Arguments[0] -eq 'rest' -and $Arguments -contains $Method
+            }
+
+            $failure = { Invoke-CollectorDeployment -Operation $Operation } |
+                Should -Throw '*Microsoft.OperationalInsights/workspaces/read*Microsoft.OperationalInsights/workspaces/listKeys/action*' -PassThru
+
+            $failure.Exception.Message | Should -Not -BeLike '*synthetic-sensitive-workspace-detail*'
+            Should -Invoke Invoke-AzureJson -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq 'deployment' }
+            Should -Invoke Write-Host -Times 0 -Exactly -ParameterFilter { ($Object -join '') -like '*synthetic-sensitive-workspace-detail*' }
+            Should -Invoke Add-Content -Times 0 -Exactly
+        }
+
+        It 'skips workspace access checks for environment reuse <ReuseEnvironment> and workspace reuse <ReuseWorkspace>' -ForEach @(
+            @{ ReuseEnvironment = 'false'; ReuseWorkspace = 'false' }
+            @{ ReuseEnvironment = 'true'; ReuseWorkspace = 'false' }
+            @{ ReuseEnvironment = 'true'; ReuseWorkspace = 'true' }
+        ) {
+            $script:settings.REUSE_CONTAINER_APP_ENVIRONMENT = $ReuseEnvironment
+            $script:settings.REUSE_LOG_ANALYTICS_WORKSPACE = $ReuseWorkspace
+
+            Invoke-CollectorDeployment -Operation plan
+
+            Should -Invoke Invoke-AzureJson -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq 'rest' }
+        }
+
         It 'stops before apply if what-if fails' {
             $script:preview.status = 'Failed'
             { Invoke-CollectorDeployment -Operation deploy } | Should -Throw '*what-if did not succeed*'

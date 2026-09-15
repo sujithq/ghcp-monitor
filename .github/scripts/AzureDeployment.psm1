@@ -262,6 +262,22 @@ function Invoke-CollectorDeployment {
         if ($settings.REUSE_LOG_ANALYTICS_WORKSPACE -eq 'false') {
             Assert-DeploymentResourceOwnership -Resources $resources -Type 'Microsoft.OperationalInsights/workspaces' -Name $settings.LOG_ANALYTICS_WORKSPACE_NAME -Repository $settings.GITHUB_REPOSITORY
         }
+        else {
+            $workspaceUrl = "/subscriptions/$($settings.AZURE_SUBSCRIPTION_ID)/resourceGroups/$($settings.LOG_ANALYTICS_RESOURCE_GROUP)/providers/Microsoft.OperationalInsights/workspaces/$($settings.LOG_ANALYTICS_WORKSPACE_NAME)"
+            try {
+                $null = Invoke-AzureJson -Arguments @(
+                    'rest', '--method', 'get', '--url', "${workspaceUrl}?api-version=2025-02-01",
+                    '--query', 'properties.customerId != `null`'
+                )
+                $null = Invoke-AzureJson -Arguments @(
+                    'rest', '--method', 'post', '--url', "$workspaceUrl/listKeys?api-version=2025-02-01",
+                    '--query', 'primarySharedKey != `null`'
+                )
+            }
+            catch {
+                throw 'Cannot access the reused Log Analytics workspace. Verify LOG_ANALYTICS_RESOURCE_GROUP and LOG_ANALYTICS_WORKSPACE_NAME, then have an authorized operator grant Microsoft.OperationalInsights/workspaces/read and Microsoft.OperationalInsights/workspaces/listKeys/action at that workspace scope. See the README workspace RBAC setup, allow time for role propagation, and start a new plan run. Raw output is withheld to protect credentials.'
+            }
+        }
     }
 
     $parameterFile = Join-Path $PSScriptRoot '../../infra/main.bicepparam'
