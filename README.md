@@ -257,10 +257,48 @@ A new workspace is pay-as-you-go with 30-day retention. New workspaces can only
 be created in the deployment resource group.
 
 For a reused workspace outside that group, an operator must separately grant
-the deployment identity workspace-read and shared-key-read permissions at that
-workspace's scope. Do not broaden its Contributor role to the subscription.
+the deployment identity `Microsoft.OperationalInsights/workspaces/read` and
+`Microsoft.OperationalInsights/workspaces/listKeys/action` at that workspace's
+scope. Contributor on the deployment group does **not** cover a workspace in
+another group. Do not broaden its Contributor role to the subscription.
 The existing Application Insights resource and its workspace association are
 never recreated or updated.
+
+#### Reused workspace RBAC setup
+
+An authorized operator (not the workflow identity) can assign the built-in
+**Log Analytics Contributor** role at the individual workspace scope:
+
+```powershell
+$workspaceId = az monitor log-analytics workspace show `
+  --subscription "<subscription-id>" `
+  --resource-group "<workspace-resource-group>" `
+  --workspace-name "<workspace-name>" --query id --output tsv --only-show-errors
+if ($LASTEXITCODE -ne 0) { throw 'Workspace lookup failed.' }
+
+az role assignment create `
+  --assignee-object-id "<deployment-managed-identity-principal-id>" `
+  --assignee-principal-type ServicePrincipal `
+  --role "Log Analytics Contributor" `
+  --scope $workspaceId --output none --only-show-errors
+if ($LASTEXITCODE -ne 0) { throw 'Workspace role assignment failed.' }
+```
+
+Use the managed identity's **principal/object ID**, not its client ID
+(`AZURE_CLIENT_ID`). This built-in role also permits workspace management;
+if that is too broad, use an operator-created custom role containing only the
+two actions above, assigned at the same workspace scope. The workflow must
+not receive Owner or role-assignment privileges.
+
+Allow time for RBAC propagation, then start a **new plan** run for a fresh OIDC
+login before deploying the reviewed SHA. Both plan and deploy now check the
+workspace read and `listKeys` APIs before template validation, without logging
+or persisting shared keys. These checks are skipped when creating a workspace
+or reusing an entire Container Apps environment, whose logging configuration
+is left unchanged. Template validation and what-if alone may succeed without
+proving access to a reused workspace's keys.
+
+#### Client IP allowlist
 
 The IP allowlist accepts canonical IPv4 CIDRs with prefixes `1-32`; a single
 address normally uses `/32`. It rejects missing/empty lists, malformed values,
@@ -325,8 +363,10 @@ and messages for recognized Azure errors. Credentials and identifiers are
 redacted; unrelated or unrecognized raw output remains withheld. Retain the
 workflow error when `plan` fails: validation can fail before any deployment
 history entry exists. Use an authorized Azure session to inspect further
-details. For a reused workspace in another resource group, verify the
-deployment identity's workspace-read and shared-key-read permissions there.
+details. For `AuthorizationFailed` on a reused workspace's `read` or
+`listKeys/action`, follow [Reused workspace RBAC setup](#reused-workspace-rbac-setup).
+Changing Bicep or rerunning deploy without correcting those permissions will
+not resolve the failure.
 
 An `InvalidTemplate` error saying a resource is "defined multiple times in a
 template" means the template declares it twice, not that it already exists in
